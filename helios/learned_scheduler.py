@@ -119,8 +119,15 @@ class BoundarySurrogateRLS:
         """Return (P_hat_MW, Q_hat_MVAR, epistemic_uncertainty)."""
         dp_hat = float(np.clip(float(phi @ self.w_p), -300.0, 300.0))
         dq_hat = float(np.clip(float(phi @ self.w_q), -300.0, 300.0))
-        p_hat = max(0.0, min(self.p_base + dp_hat, 500.0))
-        q_hat = max(-200.0, min(self.q_base + dq_hat, 300.0))
+        p_hat = max(0.0, min(self.p_base + dp_hat, 350.0))
+
+        # Physical clamping for datacenter converter load:
+        # If load is tripped (P near 0), reactive power cannot float to large capacitive values.
+        if p_hat < 5.0:
+            q_hat = max(-2.0, min(self.q_base + dq_hat, 5.0))
+        else:
+            q_hat = max(-10.0, min(self.q_base + dq_hat, 60.0))
+
         epistemic_var = float(np.clip(float(phi @ self.P_cov @ phi), 0.0, 100.0))
         uncertainty = math.sqrt(epistemic_var)
         return p_hat, q_hat, uncertainty

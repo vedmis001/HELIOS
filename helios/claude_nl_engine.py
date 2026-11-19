@@ -53,6 +53,27 @@ SCENARIO_TOOL_SCHEMA: Dict[str, Any] = {
                 "type": "string",
                 "enum": ["datacenter_vfd", "inverter_gfl", "constant_power"],
             },
+            "reconnect_mode": {
+                "type": "string",
+                "enum": ["instantaneous", "staged_ramp", "none"],
+                "description": "Post-fault datacenter reconnection strategy: instantaneous step or staged soft ramp.",
+            },
+            "reconnect_time_s": {
+                "type": "number",
+                "minimum": 0.0,
+                "description": "Timestamp (s) to initiate datacenter reconnection.",
+            },
+            "reconnect_ramp_s": {
+                "type": "number",
+                "minimum": 0.0,
+                "description": "Duration (s) of soft-start ramp when reconnect_mode='staged_ramp'.",
+            },
+            "trip_v_threshold": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 0.99,
+                "description": "Undervoltage protection trip threshold in pu (default: 0.70 pu).",
+            },
             "disturbance": {
                 "type": "object",
                 "properties": {

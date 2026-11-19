@@ -386,6 +386,8 @@ class SyntheticGridBackend(TSBackend):
         self.g_fault_on = (1.0 / z_f) if self.dist_type in ("three_phase_fault", "voltage_sag") else 0.0
         self.load_step_pu = float(dist.get("load_step_mw", 0.0)) / self.s_base_mva
 
+        self.t_reconnect = float(scenario.get("reconnect_time_s", 0.0))
+
         # Compute steady-state internal angle & EMF matching pre-disturbance V and P, Q
         p_e0 = self.p_load_pu
         q_e0 = self.q_load_pu + (self.x_eq * (p_e0 ** 2 + self.q_load_pu ** 2)) / (self.v_mag ** 2)
@@ -503,11 +505,14 @@ class SyntheticGridBackend(TSBackend):
         )
 
     def get_event_times(self) -> List[float]:
+        ev = []
         if self.dist_type in ("three_phase_fault", "voltage_sag"):
-            return [self.t_start, self.t_clear]
-        if self.dist_type == "load_step":
-            return [self.t_start]
-        return []
+            ev.extend([self.t_start, self.t_clear])
+        elif self.dist_type == "load_step":
+            ev.append(self.t_start)
+        if hasattr(self, "t_reconnect") and self.t_reconnect > 1e-4:
+            ev.append(self.t_reconnect)
+        return sorted(list(set(ev)))
 
 
 def create_ts_backend(name: str, **kwargs) -> TSBackend:

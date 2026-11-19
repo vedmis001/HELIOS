@@ -2,7 +2,7 @@
 helios_pscad_federate.py
 ═══════════════════════════════════════════════════════════════════════════════
 HELIOS Co-Simulation — PSCAD Federate
-DOE Datacenter EMT Model (Electromagnetic Transient Side)
+Modified ERCOT Datacenter EMT Model (Electromagnetic Transient Side)
 
 Boundary Bus:  5385  DALLAS 3 1  161.0 kV
 Pre-disturbance: V = 1.00559 pu,  angle = -72.489 deg
@@ -53,6 +53,12 @@ EXCHANGE_INTERVAL  = float(os.environ.get("HELIOS_EXCHANGE_INTERVAL", "10e-3"))
 TOTAL_SIM_TIME     = float(os.environ.get("HELIOS_TOTAL_SIM_TIME", "10.0"))
 ADAPTIVE_STEPPING  = os.environ.get("HELIOS_ADAPTIVE_STEPPING", "1") == "1"
 
+# Reconnection & Protection Configuration
+RECONNECT_MODE     = os.environ.get("HELIOS_RECONNECT_MODE", "staged_ramp")  # 'instantaneous', 'staged_ramp', or 'none'
+TRIP_V_THRESHOLD   = float(os.environ.get("HELIOS_TRIP_V_THRESHOLD", "0.70"))
+RECONNECT_TIME_S   = float(os.environ.get("HELIOS_RECONNECT_TIME_S", "2.0"))
+RECONNECT_RAMP_S   = float(os.environ.get("HELIOS_RECONNECT_RAMP_S", "0.40"))
+
 
 def stub_step_datacenter(
     stub_state: dict,
@@ -63,28 +69,92 @@ def stub_step_datacenter(
     profile: str,
     simulate_delay: bool = True,
 ):
-    """Dynamic datacenter/converter load response when mhi.pscad is unavailable."""
+    """Dynamic datacenter/converter load response with protection trip & reconnection."""
     dt = max(1e-4, target_time_s - stub_state["last_t"])
     stub_state["last_t"] = target_time_s
 
-    if profile == "constant_power":
-        p_target = rated_p_mw * min(1.0, v_mag_pu / 0.70)
-        q_target = rated_q_mvar
-        tau = 0.015
-    elif profile == "inverter_gfl":
-        v_dep = max(0.0, 0.92 - v_mag_pu)
-        p_target = rated_p_mw * min(1.05, (v_mag_pu / V_INIT_PU) ** 0.6)
-        q_target = rated_q_mvar - 180.0 * v_dep
-        tau = 0.020
-    else:
-        if v_mag_pu < 0.88:
-            scale = max(0.25, (v_mag_pu / 0.88) ** 1.4)
-            p_target = rated_p_mw * scale
-            q_target = rated_q_mvar * scale + 25.0 * (0.88 - v_mag_pu)
+    status = stub_state.get("status", "NORMAL")
+    mode = stub_state.get("reconnect_mode", RECONNECT_MODE)
+    trip_thresh = stub_state.get("trip_v_threshold", TRIP_V_THRESHOLD)
+    t_rec = stub_state.get("reconnect_time_s", RECONNECT_TIME_S)
+    t_ramp = stub_state.get("reconnect_ramp_s", RECONNECT_RAMP_S)
+
+    # 1. Protection Trip Evaluation (undervoltage ride-through limit)
+    # Only arm during the fault window (target_time_s >= 0.95s) or on severe collapse (V < 0.40pu)
+    # to prevent pre-fault snapshot dynamic settling from triggering an early nuisance trip
+    if status == "NORMAL" and mode != "none":
+        if target_time_s >= 0.95 or v_mag_pu < 0.40:
+            if v_mag_pu < trip_thresh:
+                stub_state["trip_timer"] = stub_state.get("trip_timer", 0.0) + dt
+                if stub_state["trip_timer"] >= 0.016:  # 1 cycle trip delay (16ms)
+                    status = "TRIPPED"
+                    stub_state["status"] = "TRIPPED"
+                    stub_state["t_trip"] = target_time_s
+                    log.info(f"*** [PSCAD] Datacenter undervoltage trip triggered at t={target_time_s:.4f}s "
+                             f"(V={v_mag_pu:.3f}pu < {trip_thresh:.2f}pu) ***")
+            else:
+                stub_state["trip_timer"] = 0.0
         else:
-            p_target = rated_p_mw * (1.0 + 0.08 * (v_mag_pu - V_INIT_PU))
-            q_target = rated_q_mvar * (v_mag_pu / V_INIT_PU) ** 1.5
-        tau = 0.025
+            stub_state["trip_timer"] = 0.0
+
+    # 2. Reconnection Initiation
+    if status == "TRIPPED" and mode != "none":
+        if target_time_s >= t_rec:
+            status = "RECONNECTING"
+            stub_state["status"] = "RECONNECTING"
+            stub_state["t_reconnect_start"] = target_time_s
+            log.info(f"*** [PSCAD] Datacenter reconnection initiated at t={target_time_s:.4f}s (mode={mode}) ***")
+
+    # 3. Dynamic Target Calculation based on Protection / Reconnection Status
+    if status == "TRIPPED":
+        p_target = 0.0
+        q_target = 0.0
+        tau = 0.008  # fast collapse to zero upon breaker opening
+    elif status == "RECONNECTING":
+        t_rel = target_time_s - stub_state.get("t_reconnect_start", t_rec)
+        if mode == "instantaneous":
+            # EMT Inrush surge: 1.25x active power inrush, 2.2x reactive magnetizing inrush
+            p_surge = 1.0 + 0.25 * math.exp(-t_rel / 0.035)
+            q_surge = 1.0 + 1.20 * math.exp(-t_rel / 0.025)
+            p_target = rated_p_mw * p_surge * min(1.0, v_mag_pu / 0.85)
+            q_target = rated_q_mvar * q_surge
+            tau = 0.010
+            if t_rel >= 0.150:
+                stub_state["status"] = "NORMAL"
+                log.info(f"[PSCAD] Datacenter reconnection settled to NORMAL at t={target_time_s:.4f}s")
+        elif mode == "staged_ramp":
+            fraction = min(1.0, max(0.0, t_rel / max(t_ramp, 1e-3)))
+            # Soft-start linear / staged power electronics ramp
+            p_target = rated_p_mw * fraction * min(1.0, v_mag_pu / 0.85)
+            q_target = rated_q_mvar * fraction
+            tau = 0.015
+            if fraction >= 1.0:
+                stub_state["status"] = "NORMAL"
+                log.info(f"[PSCAD] Datacenter staged ramp completed (100% online) at t={target_time_s:.4f}s")
+        else:
+            p_target = rated_p_mw
+            q_target = rated_q_mvar
+            tau = 0.020
+    else:
+        # NORMAL state continuous dynamic response
+        if profile == "constant_power":
+            p_target = rated_p_mw * min(1.0, v_mag_pu / 0.70)
+            q_target = rated_q_mvar
+            tau = 0.015
+        elif profile == "inverter_gfl":
+            v_dep = max(0.0, 0.92 - v_mag_pu)
+            p_target = rated_p_mw * min(1.05, (v_mag_pu / V_INIT_PU) ** 0.6)
+            q_target = rated_q_mvar - 180.0 * v_dep
+            tau = 0.020
+        else:
+            if v_mag_pu < 0.88:
+                scale = max(0.25, (v_mag_pu / 0.88) ** 1.4)
+                p_target = rated_p_mw * scale
+                q_target = rated_q_mvar * scale + 25.0 * (0.88 - v_mag_pu)
+            else:
+                p_target = rated_p_mw * (1.0 + 0.08 * (v_mag_pu - V_INIT_PU))
+                q_target = rated_q_mvar * (v_mag_pu / V_INIT_PU) ** 1.5
+            tau = 0.025
 
     alpha = 1.0 - math.exp(-dt / tau)
     stub_state["p_mw"] += alpha * (p_target - stub_state["p_mw"])
@@ -293,6 +363,10 @@ def run_cosim(
     profile: str = "datacenter_vfd",
     simulate_delay: bool = True,
     close_library: bool = True,
+    reconnect_mode: Optional[str] = None,
+    reconnect_time_s: Optional[float] = None,
+    reconnect_ramp_s: Optional[float] = None,
+    trip_v_threshold: Optional[float] = None,
 ):
     """Main co-simulation loop supporting fixed and adaptive exchange steps."""
     pscad, project = connect_pscad()
@@ -307,7 +381,17 @@ def run_cosim(
         rated_q_mvar=rated_q_mvar,
     )
 
-    stub_state = {"p_mw": rated_p_mw, "q_mvar": rated_q_mvar, "last_t": 0.0}
+    stub_state = {
+        "p_mw": rated_p_mw,
+        "q_mvar": rated_q_mvar,
+        "last_t": 0.0,
+        "status": "NORMAL",
+        "trip_timer": 0.0,
+        "reconnect_mode": reconnect_mode or RECONNECT_MODE,
+        "reconnect_time_s": reconnect_time_s if reconnect_time_s is not None else RECONNECT_TIME_S,
+        "reconnect_ramp_s": reconnect_ramp_s if reconnect_ramp_s is not None else RECONNECT_RAMP_S,
+        "trip_v_threshold": trip_v_threshold if trip_v_threshold is not None else TRIP_V_THRESHOLD,
+    }
 
     h.helicsFederateEnterInitializingMode(fed)
     h.helicsPublicationPublishDouble(pub_P, rated_p_mw)

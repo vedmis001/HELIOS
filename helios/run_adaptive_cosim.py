@@ -37,6 +37,10 @@ def run_cosim_pair(
     pf = float(scenario.get("datacenter_pf", 0.98))
     rated_q = rated_p * math.tan(math.acos(min(1.0, max(0.5, pf))))
     profile = scenario.get("component_profile", "datacenter_vfd")
+    reconnect_mode = scenario.get("reconnect_mode", None)
+    reconnect_time_s = scenario.get("reconnect_time_s", None)
+    reconnect_ramp_s = scenario.get("reconnect_ramp_s", None)
+    trip_v_threshold = scenario.get("trip_v_threshold", None)
 
     ts_out: Dict[str, Any] = {}
     errors = []
@@ -67,6 +71,10 @@ def run_cosim_pair(
                 profile=profile,
                 simulate_delay=simulate_delay,
                 close_library=False,
+                reconnect_mode=reconnect_mode,
+                reconnect_time_s=reconnect_time_s,
+                reconnect_ramp_s=reconnect_ramp_s,
+                trip_v_threshold=trip_v_threshold,
             )
         except Exception as exc:
             errors.append(("pscad", exc))

@@ -93,6 +93,13 @@ EXCHANGE_INTERVAL = float(os.environ.get("HELIOS_EXCHANGE_INTERVAL", "10e-3"))
 TOTAL_SIM_TIME    = float(os.environ.get("HELIOS_TOTAL_SIM_TIME", "10.0"))
 ADAPTIVE_STEPPING = os.environ.get("HELIOS_ADAPTIVE_STEPPING", "1") == "1"
 
+# Disturbance & Reconnection Configuration
+FAULT_ENABLE      = os.environ.get("HELIOS_FAULT_ENABLE", "1") == "1"
+FAULT_BUS         = int(os.environ.get("HELIOS_FAULT_BUS", str(BOUNDARY_BUS)))
+FAULT_START_S     = float(os.environ.get("HELIOS_FAULT_START_S", "1.0"))
+FAULT_CLEAR_S     = float(os.environ.get("HELIOS_FAULT_CLEAR_S", "1.0833"))
+RECONNECT_TIME_S  = float(os.environ.get("HELIOS_RECONNECT_TIME_S", "2.0"))
+
 # ─── PSS/E Initialization ────────────────────────────────────────────────────
 
 def initialize_psse():
@@ -220,9 +227,9 @@ def apply_datacenter_load(P_MW, Q_MVAR):
     P_MW:   active power injection from PSCAD (MW, positive = load)
     Q_MVAR: reactive power injection from PSCAD (MVAR, positive = inductive)
     """
-    # Clamp to physically reasonable bounds
-    P_MW   = max(0.0,   min(P_MW,   500.0))    # 0 to 500 MW
-    Q_MVAR = max(-100.0, min(Q_MVAR, 200.0))   # -100 to +200 MVAR
+    # Clamp to physically reasonable bounds for a 150MW datacenter
+    P_MW   = max(0.0,  min(P_MW,   250.0))    # 0 to 250 MW
+    Q_MVAR = max(-10.0, min(Q_MVAR,  80.0))    # -10 to +80 MVAR
 
     ierr = psspy.load_chng_4(
         BOUNDARY_BUS,
@@ -383,6 +390,8 @@ def run_cosim():
         rated_p_mw=DC_P_MW,
         rated_q_mvar=DC_Q_MVAR,
         v_init_pu=V_INIT_PU,
+        fault_severity=1.0 if FAULT_ENABLE else 0.0,
+        event_times=[FAULT_START_S, FAULT_CLEAR_S, RECONNECT_TIME_S] if FAULT_ENABLE else [],
     )
     surrogate = BoundarySurrogateRLS(
         p_init=DC_P_MW,
@@ -396,6 +405,10 @@ def run_cosim():
     dt_sched = sched_cfg.dt_init_s
     skip_curr = False
     skip_sched = False
+
+    # Disturbance flags for PSS/E
+    fault_applied = False
+    fault_cleared = False
 
     # 3. Enter initialization mode
     log.info("Entering HELICS initialization mode...")
@@ -464,6 +477,29 @@ def run_cosim():
 
         # ── Update datacenter load in PSS/E ──────────────────────────────
         apply_datacenter_load(p_apply, q_apply)
+
+        # ── Apply / Clear Scheduled Fault Disturbance ────────────────────
+        if FAULT_ENABLE:
+            if not fault_applied and granted_time >= FAULT_START_S - 1e-5:
+                ierr_f = psspy.dist_bus_fault(FAULT_BUS, 1, 0.0, [0.0, -20000.0])
+                if ierr_f != 0:
+                    ierr_f = psspy.dist_bus_fault(FAULT_BUS, 1, V_BASE_KV, [0.001, 0.01])
+                fault_applied = True
+                log.info(f"*** [PSSE] DISTURBANCE APPLIED: 3-phase fault at Bus {FAULT_BUS} "
+                         f"at t={granted_time:.4f}s (ierr={ierr_f}) ***")
+
+            if fault_applied and not fault_cleared and granted_time >= FAULT_CLEAR_S - 1e-5:
+                ierr_c = 0
+                if hasattr(psspy, "dist_clear_fault"):
+                    try:
+                        ierr_c = psspy.dist_clear_fault(1)
+                    except TypeError:
+                        ierr_c = psspy.dist_clear_fault()
+                elif hasattr(psspy, "dist_clear_bus_fault"):
+                    ierr_c = psspy.dist_clear_bus_fault()
+                fault_cleared = True
+                log.info(f"*** [PSSE] DISTURBANCE CLEARED: Fault cleared at Bus {FAULT_BUS} "
+                         f"at t={granted_time:.4f}s (ierr={ierr_c}) ***")
 
         # ── Advance PSS/E to granted_time ────────────────────────────────
         ierr_run = step_psse(granted_time)
