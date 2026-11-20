@@ -187,7 +187,9 @@ def run_ts_federate(
     trace_v: List[float] = [init_res.v_mag_pu]
     trace_f: List[float] = [init_res.freq_hz]
     trace_p: List[float] = [rated_p]
-    trace_dt: List[float] = []
+    trace_q: List[float] = [rated_q]
+    trace_dt: List[float] = [sched_cfg.dt_init_s]
+    trace_skip: List[bool] = [False]
     surprise_history: List[float] = []
 
     while current_time < total_time - 1e-9:
@@ -255,7 +257,9 @@ def run_ts_federate(
         trace_v.append(round(res.v_mag_pu, 6))
         trace_f.append(round(res.freq_hz, 6))
         trace_p.append(round(p_apply, 4))
+        trace_q.append(round(q_apply, 4))
         trace_dt.append(round(dt_actual, 6))
+        trace_skip.append(bool(skip_curr))
 
         prev_res = res
         prev_phi = phi_next
@@ -295,6 +299,15 @@ def run_ts_federate(
         "freq_peak_hz": round(float(np.max(trace_f)), 5),
         "mean_surrogate_err_mw": round(float(np.mean(surprise_history)), 4) if surprise_history else 0.0,
         "rls_updates": surrogate.n_updates,
+        "history": {
+            "t_s": trace_t,
+            "v_mag_pu": trace_v,
+            "freq_hz": trace_f,
+            "p_mw": trace_p,
+            "q_mvar": trace_q,
+            "dt_s": trace_dt,
+            "skip_emt": trace_skip,
+        },
         "trace_sample": {
             "t": trace_t[::max(1, len(trace_t) // 25)],
             "v_pu": trace_v[::max(1, len(trace_v) // 25)],

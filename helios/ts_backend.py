@@ -340,13 +340,13 @@ class SyntheticGridBackend(TSBackend):
     def __init__(self):
         self.s_base_mva = 100.0
         self.x_eq = 0.085
-        self.h_const = 4.5
-        self.d_damp = 2.0
-        self.tau_gov = 0.6
+        self.h_const = 40.0  # Equivalent area inertia for Texas Bus 5385 balancing area
+        self.d_damp = 3.0
+        self.tau_gov = 0.5
         self.r_droop = 0.05
-        self.tau_avr = 0.15
-        self.k_avr = 25.0
-        self.v_ref = 1.018
+        self.tau_avr = 0.12
+        self.k_avr = 20.0
+        self.v_ref = 1.00559
         self.omega_0 = 2.0 * math.pi * 60.0
 
         # State vector x = [delta (rad), omega_pu, e_q (pu), p_m (pu)]
@@ -382,7 +382,7 @@ class SyntheticGridBackend(TSBackend):
         self.dist_type = dist.get("type", "three_phase_fault")
         self.t_start = float(dist.get("t_start_s", 1.0))
         self.t_clear = float(dist.get("t_clear_s", 1.0833))
-        z_f = max(float(dist.get("fault_impedance_pu", 0.30)), 0.02)
+        z_f = max(float(dist.get("fault_impedance_pu", 0.02)), 0.005)
         self.g_fault_on = (1.0 / z_f) if self.dist_type in ("three_phase_fault", "voltage_sag") else 0.0
         self.load_step_pu = float(dist.get("load_step_mw", 0.0)) / self.s_base_mva
 
@@ -430,39 +430,55 @@ class SyntheticGridBackend(TSBackend):
         p_target = self.p_load_pu + dp_extra
         q_target = self.q_load_pu
 
-        v = max(self.v_mag, 0.25)
-        ang = self.v_ang_rad
+        # Severe bolted fault condition: terminal voltage clamped by low impedance to ground
+        if g_fault > 5.0:
+            v = min(0.165, 1.0 / (g_fault * self.x_eq))
+            p_e = (e_q * v / self.x_eq) * 0.05
+            return v, delta, p_e
+
+        # Near open-circuit condition (tripped / disconnected datacenter load):
+        # No current flows across generator reactance -> V = E_q, theta = delta, P_e = 0
+        if p_target < 0.02 and q_target < 0.02:
+            return float(e_q), float(delta), 0.0
+
+        # General loaded condition: solve Newton-Raphson initialized near rotor angle
+        v = float(np.clip(self.v_mag if self.v_mag > 0.4 else 1.0, 0.5, 1.25))
+        ang = float(delta - (p_target * self.x_eq) / (e_q * v))
         for _ in range(15):
-            sin_d = math.sin(delta - ang)
-            cos_d = math.cos(delta - ang)
-            p_gen = (e_q * v / self.x_eq) * sin_d
-            q_gen = (e_q * v * cos_d - v * v) / self.x_eq
+            sd = math.sin(delta - ang)
+            cd = math.cos(delta - ang)
+            p_gen = (e_q * v / self.x_eq) * sd
+            q_gen = (e_q * v * cd - v * v) / self.x_eq
             f1 = p_gen - (p_target + g_fault * v * v)
             f2 = q_gen - q_target
-            if max(abs(f1), abs(f2)) < 1e-9:
+            if max(abs(f1), abs(f2)) < 1e-8:
                 break
             # Exact 2x2 Jacobian d[f1,f2]/d[v, ang]
-            j11 = (e_q / self.x_eq) * sin_d - 2.0 * g_fault * v
-            j12 = -(e_q * v / self.x_eq) * cos_d
-            j21 = (e_q * cos_d - 2.0 * v) / self.x_eq
-            j22 = (e_q * v / self.x_eq) * sin_d
+            j11 = (e_q / self.x_eq) * sd - 2.0 * g_fault * v
+            j12 = -(e_q * v / self.x_eq) * cd
+            j21 = (e_q * cd - 2.0 * v) / self.x_eq
+            j22 = (e_q * v / self.x_eq) * sd
             det = j11 * j22 - j12 * j21
             if abs(det) < 1e-9:
                 break
             dv = -(j22 * f1 - j12 * f2) / det
             da = -(-j21 * f1 + j11 * f2) / det
             v = float(np.clip(v + dv, 0.15, 1.35))
-            ang = float(ang + np.clip(da, -0.3, 0.3))
+            ang = float(ang + np.clip(da, -0.2, 0.2))
         p_e = (e_q * v / self.x_eq) * math.sin(delta - ang)
         return v, ang, p_e
 
     def _eval_ode(self, x: np.ndarray, t: float) -> tuple[np.ndarray, float, float]:
-        _, omega, e_q, p_m = x
+        delta, omega, e_q, p_m = x
         v, ang, p_e = self._solve_bus_algebraic(x, t)
         d_delta = self.omega_0 * (omega - 1.0)
         d_omega = (p_m - p_e - self.d_damp * (omega - 1.0)) / (2.0 * self.h_const)
-        d_eq = (self.k_avr * (self.v_ref - v) - e_q) / self.tau_avr
-        d_pm = (self.p_load_pu - (omega - 1.0) / self.r_droop - p_m) / self.tau_gov
+        # Exciter with standard field voltage ceiling [0.5, 2.2]
+        e_fd = float(np.clip(self.k_avr * (self.v_ref - v) + 1.0, 0.5, 2.2))
+        d_eq = (e_fd - e_q) / self.tau_avr
+        # Governor with droop and [0.0, 2.5] limit
+        p_ref = float(np.clip(self.p_load_pu - (omega - 1.0) / self.r_droop, 0.0, 2.5))
+        d_pm = (p_ref - p_m) / self.tau_gov
         return np.array([d_delta, d_omega, d_eq, d_pm], dtype=np.float64), v, ang
 
     def step(self, t_target: float, dt: float) -> TSStepResult:
@@ -515,6 +531,65 @@ class SyntheticGridBackend(TSBackend):
         return sorted(list(set(ev)))
 
 
+class StiffGridBackend(TSBackend):
+    """Infinite-bus / stiff source representation ('No PSS/E TS stuff').
+
+    Represents what an engineer sees when running PSCAD standalone without
+    coupling to PSS/E: voltage recovers instantaneously to nominal upon fault
+    clearing, completely omitting multi-machine inertia, AVR excitation response,
+    and secondary voltage depression upon load reconnection.
+    """
+    def __init__(self):
+        self.v_init_pu = 1.00559
+        self.v_init_deg = -72.489
+        self.t_start = 1.0
+        self.t_clear = 1.0833
+        self.t_reconnect = 2.0
+        self.dist_type = "three_phase_fault"
+        self.p_mw = 150.0
+        self.q_mvar = 30.6
+
+    def initialize(self, scenario: Dict[str, Any]) -> TSStepResult:
+        self.v_init_pu = float(scenario.get("v_init_pu", 1.00559))
+        self.v_init_deg = float(scenario.get("v_init_deg", -72.489))
+        dist = scenario.get("disturbance", {})
+        self.t_start = float(dist.get("t_start_s", 1.0))
+        self.t_clear = float(dist.get("t_clear_s", 1.0833))
+        self.t_reconnect = float(scenario.get("reconnect_time_s", 2.0))
+        return TSStepResult(
+            t_s=0.0,
+            v_mag_pu=self.v_init_pu,
+            v_angle_deg=self.v_init_deg,
+            freq_hz=60.0,
+            min_bus_v_pu=self.v_init_pu,
+            max_rotor_spread_rad=0.0,
+            converged=True,
+            event_active=False,
+        )
+
+    def apply_boundary_load(self, p_mw: float, q_mvar: float) -> None:
+        self.p_mw = p_mw
+        self.q_mvar = q_mvar
+
+    def step(self, t_target: float, dt: float) -> TSStepResult:
+        # Fault drops voltage to 0.16 pu, but otherwise stiff 1.00559 pu source!
+        on_fault = self.t_start <= t_target < self.t_clear
+        v_mag = 0.165 if on_fault else self.v_init_pu
+        return TSStepResult(
+            t_s=t_target,
+            v_mag_pu=v_mag,
+            v_angle_deg=self.v_init_deg,
+            freq_hz=60.0,  # Infinite bus frequency never moves!
+            min_bus_v_pu=v_mag,
+            max_rotor_spread_rad=0.0,
+            converged=True,
+            event_active=on_fault,
+        )
+
+    def get_event_times(self) -> List[float]:
+        return sorted(list(set([self.t_start, self.t_clear, self.t_reconnect])))
+
+
 def create_ts_backend(name: str, **kwargs) -> TSBackend:
     """Factory returning the requested TS solver backend."""
     key = name.lower().strip()
@@ -524,4 +599,6 @@ def create_ts_backend(name: str, **kwargs) -> TSBackend:
         return PSSEBackend()
     if key in ("synthetic", "test"):
         return SyntheticGridBackend()
-    raise ValueError(f"Unknown TS backend '{name}'. Expected: tsaopt, psse, synthetic.")
+    if key in ("stiff", "no_ts", "infinite_bus"):
+        return StiffGridBackend()
+    raise ValueError(f"Unknown TS backend '{name}'. Expected: tsaopt, psse, synthetic, stiff.")

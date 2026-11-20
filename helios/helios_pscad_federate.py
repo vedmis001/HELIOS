@@ -194,7 +194,7 @@ class PSCADSocketBridge:
             self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_sock.bind((self.host, self.port))
             self.server_sock.listen(1)
-            self.server_sock.settimeout(0.05)
+            self.server_sock.setblocking(False)
             self.is_server = True
             log.info(f"PSCAD Socket Bridge listening on {self.host}:{self.port} (ready for Application_1)")
         except Exception as e:
@@ -220,7 +220,7 @@ class PSCADSocketBridge:
                 self.client_sock = client
                 self.connected = True
                 log.info(f"PSCAD Application_1 connected successfully from {addr}!")
-            except (socket.timeout, BlockingIOError):
+            except (socket.timeout, BlockingIOError, OSError):
                 return None
             except Exception as e:
                 return None
