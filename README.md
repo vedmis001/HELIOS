@@ -89,6 +89,7 @@ helios_cosim/
 
 1. **Co-Simulation Engine (`helios/`)**
    - **Why Co-Simulation?** Standalone EMT (PSCAD on an infinite bus) misses bulk-grid voltage sags and frequency nadirs; standalone TS (PSS/E with static loads) misses sub-cycle converter inrush and protection tripping. HELIOS couples both domains dynamically.
+   - **Heavily Modified ERCOT Baseline Datacenter Model**: The PSCAD EMT datacenter federate builds on a heavily modified ERCOT baseline large-load/datacenter model, adapted for real-time HELICS boundary exchange, undervoltage ride-through/tripping, and staged reconnection dynamics.
    - **Adaptive RLS Surrogate Scheduling (`helios/core/scheduler/`)**: During quasi-steady periods, the online RLS surrogate predicts boundary $P/Q$ injections and safely bypasses expensive EMT calls while tightly clamping step sizes around faults, breaker trips, and reconnections.
    - **Datacenter Reconnection Benchmark (`helios/studies/reconnection/`)**: Compares instantaneous breaker reclosure vs. 400 ms staged soft-start ramping vs. standalone stiff-grid EMT (see [`RECONNECTION_STUDY.md`](helios/studies/reconnection/RECONNECTION_STUDY.md)).
 
@@ -183,7 +184,8 @@ We would like to thank Tim McNamara, Professor Larry Pileggi, and other lab memb
 4. **EMT & Transient Stability Simulators:**
    - Manitoba Hydro International Ltd., *PSCAD™ / EMTDC™ Electromagnetic Transients Simulation Software & Co-Simulation Interface (ComFab / `mhi.psout`)*. [https://www.pscad.com](https://www.pscad.com)
    - Siemens PTI, *PSS®E — High-Performance Transmission Planning and Analysis Software*.
-5. **Large-Load & Datacenter Grid Reliability:** North American Electric Reliability Corporation (NERC), *Large Loads Task Force (LLTF) — Characteristics and Risks of Emerging Large Loads*, Technical Reports and Interconnection Reliability Assessments. [https://www.nerc.com](https://www.nerc.com)
+5. **ERCOT Baseline Datacenter / Large-Load EMT Model:** Electric Reliability Council of Texas (ERCOT), *Large Flexible Load Task Force (LFLTF) — Baseline Datacenter / Large-Load EMT Modeling Reference* (heavily modified in PSCAD for HELIOS boundary co-simulation, fault ride-through, and reconnection studies). [https://www.ercot.com](https://www.ercot.com)
+6. **Large-Load & Datacenter Grid Reliability:** North American Electric Reliability Corporation (NERC), *Large Loads Task Force (LLTF) — Characteristics and Risks of Emerging Large Loads*, Technical Reports and Interconnection Reliability Assessments. [https://www.nerc.com](https://www.nerc.com)
 
 ---
 
