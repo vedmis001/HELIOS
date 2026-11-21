@@ -92,10 +92,14 @@ def create_ts_federate(
 
     sub_P = h.helicsFederateRegisterSubscription(fed, "pscad_federate/P_injection", "MW")
     sub_Q = h.helicsFederateRegisterSubscription(fed, "pscad_federate/Q_injection", "MVAR")
+    sub_P_ups = h.helicsFederateRegisterSubscription(fed, "pscad_federate/P_ups", "MW")
+    sub_V_dc = h.helicsFederateRegisterSubscription(fed, "pscad_federate/V_dc", "V")
     h.helicsInputSetDefaultDouble(sub_P, rated_p_mw)
     h.helicsInputSetDefaultDouble(sub_Q, rated_q_mvar)
+    h.helicsInputSetDefaultDouble(sub_P_ups, 0.0)
+    h.helicsInputSetDefaultDouble(sub_V_dc, 900.0)
 
-    return fed, pub_V_mag, pub_V_angle, pub_next_dt, pub_skip_emt, sub_P, sub_Q
+    return fed, pub_V_mag, pub_V_angle, pub_next_dt, pub_skip_emt, sub_P, sub_Q, sub_P_ups, sub_V_dc
 
 
 def run_ts_federate(
@@ -149,7 +153,7 @@ def run_ts_federate(
         surrogate = BoundarySurrogateRLS(p_init=rated_p, q_init=rated_q)
         policy = AdaptiveStepPolicy(sched_cfg, ctx)
 
-    fed, pub_V_mag, pub_V_angle, pub_next_dt, pub_skip_emt, sub_P, sub_Q = create_ts_federate(
+    fed, pub_V_mag, pub_V_angle, pub_next_dt, pub_skip_emt, sub_P, sub_Q, sub_P_ups, sub_V_dc = create_ts_federate(
         core_type=core_type,
         broker_name=broker_name,
         adaptive=adaptive,
@@ -193,9 +197,12 @@ def run_ts_federate(
     trace_f: List[float] = [init_res.freq_hz]
     trace_p: List[float] = [rated_p]
     trace_q: List[float] = [rated_q]
+    trace_p_ups: List[float] = [0.0]
+    trace_v_dc: List[float] = [900.0]
     trace_dt: List[float] = [sched_cfg.dt_init_s]
     trace_skip: List[bool] = [False]
     surprise_history: List[float] = []
+    last_p_ups, last_v_dc = 0.0, 900.0
 
     while current_time < total_time - 1e-9:
         target_t = min(total_time, current_time + dt_curr)
@@ -207,10 +214,14 @@ def run_ts_federate(
             surrogate_bypass_count += 1
             p_apply, q_apply, unc = surrogate.predict(prev_phi)
             surprise_mw = 0.0
+            p_ups_curr, v_dc_curr = last_p_ups, last_v_dc
         else:
             emt_sync_count += 1
             p_meas = h.helicsInputGetDouble(sub_P)
             q_meas = h.helicsInputGetDouble(sub_Q)
+            p_ups_curr = h.helicsInputGetDouble(sub_P_ups)
+            v_dc_curr = h.helicsInputGetDouble(sub_V_dc)
+            last_p_ups, last_v_dc = p_ups_curr, v_dc_curr
             err_p, _ = surrogate.update(prev_phi, p_meas, q_meas)
             surprise_mw = err_p
             surprise_history.append(err_p)
@@ -263,6 +274,8 @@ def run_ts_federate(
         trace_f.append(round(res.freq_hz, 6))
         trace_p.append(round(p_apply, 4))
         trace_q.append(round(q_apply, 4))
+        trace_p_ups.append(round(p_ups_curr, 4))
+        trace_v_dc.append(round(v_dc_curr, 3))
         trace_dt.append(round(dt_actual, 6))
         trace_skip.append(bool(skip_curr))
 
@@ -310,6 +323,8 @@ def run_ts_federate(
             "freq_hz": trace_f,
             "p_mw": trace_p,
             "q_mvar": trace_q,
+            "p_ups_mw": trace_p_ups,
+            "v_dc_v": trace_v_dc,
             "dt_s": trace_dt,
             "skip_emt": trace_skip,
         },

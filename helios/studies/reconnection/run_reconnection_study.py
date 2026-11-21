@@ -138,19 +138,21 @@ def plot_three_case_comparison(
         p = np.array(hist.get("p_mw", []))
         q = np.array(hist.get("q_mvar", []))
         f = np.array(hist.get("freq_hz", []))
+        p_ups = np.array(hist.get("p_ups_mw", np.zeros_like(t)))
+        v_dc = np.array(hist.get("v_dc_v", np.full_like(t, 900.0)))
         dt = np.array(hist.get("dt_s", [])) * 1e3
         skip = np.array(hist.get("skip_emt", []), dtype=bool)
-        return t, v, p, q, f, dt, skip
+        return t, v, p, q, f, p_ups, v_dc, dt, skip
 
-    t_s, v_s, p_s, q_s, f_s, dt_s, skip_s = get_arrays(res_step)
-    t_r, v_r, p_r, q_r, f_r, dt_r, skip_r = get_arrays(res_ramp)
-    t_n, v_n, p_n, q_n, f_n, dt_n, skip_n = get_arrays(res_no_ts)
+    t_s, v_s, p_s, q_s, f_s, ups_s, vdc_s, dt_s, skip_s = get_arrays(res_step)
+    t_r, v_r, p_r, q_r, f_r, ups_r, vdc_r, dt_r, skip_r = get_arrays(res_ramp)
+    t_n, v_n, p_n, q_n, f_n, ups_n, vdc_n, dt_n, skip_n = get_arrays(res_no_ts)
 
-    fig, axes = plt.subplots(4, 2, figsize=(20, 15), dpi=220, gridspec_kw={"width_ratios": [1.35, 1.0]})
-    plt.subplots_adjust(hspace=0.28, wspace=0.16, left=0.06, right=0.96, top=0.92, bottom=0.06)
+    fig, axes = plt.subplots(5, 2, figsize=(20, 18.5), dpi=220, gridspec_kw={"width_ratios": [1.35, 1.0]})
+    plt.subplots_adjust(hspace=0.28, wspace=0.16, left=0.06, right=0.96, top=0.93, bottom=0.05)
 
     # Shading and gridlines
-    for r in range(4):
+    for r in range(5):
         # Column 0: Full Overview (0 to 3.5s)
         axes[r, 0].xaxis.set_major_locator(MultipleLocator(0.2))
         axes[r, 0].xaxis.set_minor_locator(MultipleLocator(0.05))
@@ -159,8 +161,8 @@ def plot_three_case_comparison(
         axes[r, 0].grid(True, which="minor", linestyle=":", color="#e8e8e8", alpha=0.45, linewidth=0.5)
         axes[r, 0].tick_params(axis="both", which="major", labelsize=10)
 
-        # Column 1: Reconnection Detail Zoom (1.8s to 2.8s)
-        axes[r, 1].set_xlim(1.8, 2.8)
+        # Column 1: Reconnection Detail Zoom (1.8s to 2.9s)
+        axes[r, 1].set_xlim(1.8, 2.9)
         axes[r, 1].xaxis.set_major_locator(MultipleLocator(0.2))
         axes[r, 1].xaxis.set_minor_locator(MultipleLocator(0.05))
         axes[r, 1].xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
@@ -191,7 +193,7 @@ def plot_three_case_comparison(
             ax.set_title("Full Simulation Overview (0 to 3.5s)", fontsize=13, fontweight="bold", pad=8)
             ax.legend(loc="lower right", fontsize=8.5, framealpha=0.92)
         else:
-            ax.set_title("Reconnection Detail Zoom (1.8s to 2.8s)", fontsize=13, fontweight="bold", pad=8)
+            ax.set_title("Reconnection Detail Zoom (1.8s to 2.9s)", fontsize=13, fontweight="bold", pad=8)
 
     # ── Row 1: Datacenter Active Power P ──────────────────────────────────────
     y1_min, y1_max = compute_adaptive_ylim(np.concatenate([p_s, p_r, p_n]), pad_ratio=0.10, force_zero_bottom=True)
@@ -200,7 +202,7 @@ def plot_three_case_comparison(
         ax.plot(t_r, p_r, color="#2ca02c", linewidth=2.0, label=label_ramp)
         ax.plot(t_n, p_n, color="#1f77b4", linewidth=1.6, linestyle="--", label=label_nots)
         ax.axhline(150.0, color="#8c564b", linestyle=":", linewidth=1.1, label="Nominal 150 MW")
-        ax.set_ylabel("Active Power P (MW)", fontsize=11, fontweight="bold")
+        ax.set_ylabel("Grid Active Power P (MW)", fontsize=11, fontweight="bold")
         ax.set_ylim(0.0, max(210.0, y1_max))
         ax.yaxis.set_major_locator(MultipleLocator(50.0))
         if c == 0:
@@ -213,26 +215,63 @@ def plot_three_case_comparison(
         ax.plot(t_r, q_r, color="#2ca02c", linewidth=2.0, label=label_ramp)
         ax.plot(t_n, q_n, color="#1f77b4", linewidth=1.6, linestyle="--", label=label_nots)
         ax.axhline(30.6, color="#8c564b", linestyle=":", linewidth=1.1, label="Nominal 30.6 MVAR")
-        ax.set_ylabel("Reactive Power Q (MVAR)", fontsize=11, fontweight="bold")
+        ax.set_ylabel("Grid Reactive Power Q (MVAR)", fontsize=11, fontweight="bold")
         ax.set_ylim(-2.0, max(85.0, y2_max))
         ax.yaxis.set_major_locator(MultipleLocator(20.0))
         if c == 0:
             ax.legend(loc="center right", fontsize=8.5, framealpha=0.92)
 
     # ── Row 3: Grid Frequency ─────────────────────────────────────────────────
+    y3_min, y3_max = compute_adaptive_ylim(np.concatenate([f_s, f_r, f_n]), pad_ratio=0.12, min_span=0.3)
     for c, ax in enumerate([axes[3, 0], axes[3, 1]]):
         ax.plot(t_s, f_s, color="#d62728", linewidth=1.8, label=label_step)
         ax.plot(t_r, f_r, color="#2ca02c", linewidth=2.0, label=label_ramp)
         ax.plot(t_n, f_n, color="#1f77b4", linewidth=1.6, linestyle="--", label=label_nots)
         ax.axhline(60.0, color="black", linestyle=":", linewidth=1.1)
         ax.set_ylabel("Frequency (Hz)", fontsize=11, fontweight="bold")
-        ax.set_xlabel("Simulation Time (seconds, major ticks every 0.2s)", fontsize=11, fontweight="bold")
-        ax.set_ylim(59.60, 60.35)
+        ax.set_ylim(min(59.85, y3_min), max(60.20, y3_max))
         ax.yaxis.set_major_locator(MultipleLocator(0.2))
         if c == 0:
-            ax.legend(loc="lower left", fontsize=8.5, framealpha=0.92)
+            ax.legend(loc="upper right", fontsize=8.5, framealpha=0.92)
 
-    fig.suptitle("HELIOS Co-Simulation Value Demonstration: 150 MW Datacenter Reconnection Study", fontsize=16, fontweight="bold", y=0.965)
+    # ── Row 4: Internal Datacenter UPS Battery Power ──────────────────────────
+    for c, ax in enumerate([axes[4, 0], axes[4, 1]]):
+        ax.axhspan(0.0, 145.0, color="#fff3cd", alpha=0.22)   # Discharge zone (IT backup)
+        ax.axhspan(-35.0, 0.0, color="#d1ecf1", alpha=0.28)   # Recharge zone (grid draw)
+        ax.axhline(0.0, color="black", linestyle="-", linewidth=0.9, alpha=0.7)
+        ax.axhline(120.0, color="#8c564b", linestyle=":", linewidth=1.0, label="Critical IT Load (120 MW)")
+        ax.plot(t_s, ups_s, color="#d62728", linewidth=1.9, label=label_step)
+        ax.plot(t_r, ups_r, color="#2ca02c", linewidth=2.1, label=label_ramp)
+        ax.plot(t_n, ups_n, color="#1f77b4", linewidth=1.6, linestyle="--", label=label_nots)
+        ax.set_ylabel("Internal UPS Power (MW)\n(+Discharge / -Charge)", fontsize=10.5, fontweight="bold")
+        ax.set_xlabel("Simulation Time (seconds, major ticks every 0.2s)", fontsize=11, fontweight="bold")
+        ax.set_ylim(-32.0, 140.0)
+        ax.yaxis.set_major_locator(MultipleLocator(30.0))
+        if c == 0:
+            ax.text(1.50, 126.0, "UPS Islanded Backup (+120 MW IT)", ha="center", fontsize=8.5, fontweight="bold", color="#7a5200")
+            ax.text(2.95, -28.0, "Battery Recharge (-MW)", ha="center", fontsize=8.5, fontweight="bold", color="#0c5460")
+            ax.legend(loc="upper right", fontsize=8.0, framealpha=0.92)
+        else:
+            ax.annotate(
+                "Closed-Transition\nSoft Walk-In (400 ms)",
+                xy=(2.20, 60.0), xytext=(2.32, 92.0),
+                arrowprops=dict(arrowstyle="->", color="#2ca02c", lw=1.2),
+                fontsize=8.5, fontweight="bold", color="#1b6e1b",
+            )
+            ax.annotate(
+                "Grid-Sag Support Pulse\n(Missed by Stiff Grid!)",
+                xy=(2.025, 22.0), xytext=(2.18, 30.0),
+                arrowprops=dict(arrowstyle="->", color="#d62728", lw=1.2),
+                fontsize=8.5, fontweight="bold", color="#a61c1c",
+            )
+            ax.annotate(
+                "Immediate -20 MW Bulk Recharge\n(vs. Deferred -8 MW Trickle)",
+                xy=(2.42, -19.5), xytext=(2.48, -11.5),
+                arrowprops=dict(arrowstyle="->", color="#d62728", lw=1.1),
+                fontsize=8.0, fontweight="bold", color="#a61c1c",
+            )
+
+    fig.suptitle("HELIOS Co-Simulation Value Demonstration: 150 MW Datacenter & Internal UPS Reconnection Study", fontsize=16, fontweight="bold", y=0.965)
     fig.savefig(save_path, bbox_inches="tight")
     log.info(f"High-clarity 3-case comparison plot saved to: {save_path}")
 

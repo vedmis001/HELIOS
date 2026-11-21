@@ -103,33 +103,62 @@ def stub_step_datacenter(
             status = "RECONNECTING"
             stub_state["status"] = "RECONNECTING"
             stub_state["t_reconnect_start"] = target_time_s
+            stub_state["v_pre_reconnect"] = v_mag_pu
             log.info(f"*** [PSCAD] Datacenter reconnection initiated at t={target_time_s:.4f}s (mode={mode}) ***")
 
-    # 3. Dynamic Target Calculation based on Protection / Reconnection Status
+    # 3. Dynamic Target Calculation (Grid-Side P/Q + Internal UPS Battery & DC-Link)
+    critical_it_mw = 0.80 * rated_p_mw  # 120 MW critical IT compute load on UPS
+    p_ups_target = 0.0
+    v_dc_target = 900.0
+    tau_ups = 0.015
+
     if status == "TRIPPED":
         p_target = 0.0
         q_target = 0.0
         tau = 0.008  # fast collapse to zero upon breaker opening
+        p_ups_target = critical_it_mw  # UPS carries 100% of critical IT compute load
+        tau_ups = 0.006
+        v_dc_target = 900.0
+        stub_state["ups_discharged_mj"] = stub_state.get("ups_discharged_mj", 0.0) + max(0.0, stub_state.get("p_ups_mw", 0.0)) * dt
     elif status == "RECONNECTING":
         t_rel = target_time_s - stub_state.get("t_reconnect_start", t_rec)
+        v_pre = stub_state.get("v_pre_reconnect", V_INIT_PU)
+        v_dip = max(0.0, v_pre - v_mag_pu)  # Secondary PCC voltage depression seen by rectifier
+
         if mode == "instantaneous":
-            # EMT Inrush surge: 1.25x active power inrush, 2.2x reactive magnetizing inrush
+            # Uncoordinated hard transfer: UPS drops load abruptly & immediately enters bulk recharge,
+            # stacking recharge demand on top of converter inrush. If the grid sags (Co-Sim), the
+            # UPS buck-boost pulses briefly to stabilize the 900 V DC-link.
+            recharge_mw = -20.0 * (1.0 - math.exp(-t_rel / 0.030))
+            sag_support_mw = 2800.0 * max(0.0, v_dip - 0.0015)  # Grid-coupled DC-link droop support pulse
+            p_ups_target = recharge_mw + sag_support_mw
+            tau_ups = 0.010
+
             p_surge = 1.0 + 0.25 * math.exp(-t_rel / 0.035)
             q_surge = 1.0 + 1.20 * math.exp(-t_rel / 0.025)
-            p_target = rated_p_mw * p_surge * min(1.0, v_mag_pu / 0.85)
+            # Grid sees IT + HVAC + inrush + battery recharge (-p_ups when charging)
+            recharge_grid_load = max(0.0, -stub_state.get("p_ups_mw", 0.0))
+            p_target = rated_p_mw * p_surge * min(1.0, v_mag_pu / 0.85) + recharge_grid_load
             q_target = rated_q_mvar * q_surge
+            v_dc_target = 900.0 + 28.0 * math.exp(-t_rel / 0.025) * math.cos(2.0 * math.pi * 18.0 * t_rel) - 400.0 * v_dip
             tau = 0.010
-            if t_rel >= 0.150:
+            if t_rel >= 0.350:
                 stub_state["status"] = "NORMAL"
+                stub_state["post_rec_recharge"] = True
                 log.info(f"[PSCAD] Datacenter reconnection settled to NORMAL at t={target_time_s:.4f}s")
         elif mode == "staged_ramp":
             fraction = min(1.0, max(0.0, t_rel / max(t_ramp, 1e-3)))
-            # Soft-start linear / staged power electronics ramp
+            # Closed-transition soft walk-in: UPS smoothly hands off 120 MW IT load as grid ramps up
+            p_ups_target = critical_it_mw * (1.0 - fraction)
+            tau_ups = 0.012
             p_target = rated_p_mw * fraction * min(1.0, v_mag_pu / 0.85)
             q_target = rated_q_mvar * fraction
+            v_dc_target = 900.0 - 4.0 * math.sin(math.pi * fraction)
             tau = 0.015
             if fraction >= 1.0:
                 stub_state["status"] = "NORMAL"
+                stub_state["post_rec_recharge"] = True
+                stub_state["t_ramp_done"] = target_time_s
                 log.info(f"[PSCAD] Datacenter staged ramp completed (100% online) at t={target_time_s:.4f}s")
         else:
             p_target = rated_p_mw
@@ -137,13 +166,35 @@ def stub_step_datacenter(
             tau = 0.020
     else:
         # NORMAL state continuous dynamic response
+        if v_mag_pu < trip_thresh and (target_time_s >= 0.95 or v_mag_pu < 0.40):
+            # Pre-trip fault ride-through: UPS starts picking up IT load immediately as V_dc sags
+            p_ups_target = critical_it_mw
+            tau_ups = 0.005
+            v_dc_target = 855.0
+        elif stub_state.get("post_rec_recharge", False):
+            # Post-reconnection battery recharge (immediate bulk vs deferred gentle trickle)
+            if mode == "staged_ramp":
+                t_since_ramp = target_time_s - stub_state.get("t_ramp_done", t_rec + t_ramp)
+                if t_since_ramp >= 0.25:
+                    # Deferred gentle trickle recharge after grid settles
+                    p_ups_target = -8.0 * min(1.0, (t_since_ramp - 0.25) / 0.15)
+                else:
+                    p_ups_target = 0.0
+                tau_ups = 0.030
+            else:
+                # Continuing bulk recharge tapering off slowly
+                t_since_rec = target_time_s - stub_state.get("t_reconnect_start", t_rec)
+                p_ups_target = -20.0 * math.exp(-max(0.0, t_since_rec - 0.35) / 1.8)
+                tau_ups = 0.030
+
+        recharge_grid_load = max(0.0, -stub_state.get("p_ups_mw", 0.0))
         if profile == "constant_power":
-            p_target = rated_p_mw * min(1.0, v_mag_pu / 0.70)
+            p_target = rated_p_mw * min(1.0, v_mag_pu / 0.70) + recharge_grid_load
             q_target = rated_q_mvar
             tau = 0.015
         elif profile == "inverter_gfl":
             v_dep = max(0.0, 0.92 - v_mag_pu)
-            p_target = rated_p_mw * min(1.05, (v_mag_pu / V_INIT_PU) ** 0.6)
+            p_target = rated_p_mw * min(1.05, (v_mag_pu / V_INIT_PU) ** 0.6) + recharge_grid_load
             q_target = rated_q_mvar - 180.0 * v_dep
             tau = 0.020
         else:
@@ -152,13 +203,17 @@ def stub_step_datacenter(
                 p_target = rated_p_mw * scale
                 q_target = rated_q_mvar * scale + 25.0 * (0.88 - v_mag_pu)
             else:
-                p_target = rated_p_mw * (1.0 + 0.08 * (v_mag_pu - V_INIT_PU))
+                p_target = rated_p_mw * (1.0 + 0.08 * (v_mag_pu - V_INIT_PU)) + recharge_grid_load
                 q_target = rated_q_mvar * (v_mag_pu / V_INIT_PU) ** 1.5
             tau = 0.025
 
     alpha = 1.0 - math.exp(-dt / tau)
+    alpha_ups = 1.0 - math.exp(-dt / tau_ups)
+    alpha_vdc = 1.0 - math.exp(-dt / 0.012)
     stub_state["p_mw"] += alpha * (p_target - stub_state["p_mw"])
     stub_state["q_mvar"] += alpha * (q_target - stub_state["q_mvar"])
+    stub_state["p_ups_mw"] = stub_state.get("p_ups_mw", 0.0) + alpha_ups * (p_ups_target - stub_state.get("p_ups_mw", 0.0))
+    stub_state["v_dc_v"] = stub_state.get("v_dc_v", 900.0) + alpha_vdc * (v_dc_target - stub_state.get("v_dc_v", 900.0))
     return stub_state["p_mw"], stub_state["q_mvar"]
 
 
@@ -329,6 +384,12 @@ def create_pscad_federate(
     pub_Q = h.helicsFederateRegisterGlobalPublication(
         fed, "pscad_federate/Q_injection", h.HELICS_DATA_TYPE_DOUBLE, "MVAR"
     )
+    pub_P_ups = h.helicsFederateRegisterGlobalPublication(
+        fed, "pscad_federate/P_ups", h.HELICS_DATA_TYPE_DOUBLE, "MW"
+    )
+    pub_V_dc = h.helicsFederateRegisterGlobalPublication(
+        fed, "pscad_federate/V_dc", h.HELICS_DATA_TYPE_DOUBLE, "V"
+    )
 
     sub_V_mag = h.helicsFederateRegisterSubscription(
         fed, "psse_federate/boundary_V_mag", "pu"
@@ -349,7 +410,7 @@ def create_pscad_federate(
     h.helicsInputSetDefaultDouble(sub_V_mag, V_INIT_PU)
     h.helicsInputSetDefaultDouble(sub_V_angle, V_INIT_DEG)
 
-    return fed, pub_P, pub_Q, sub_V_mag, sub_V_angle, sub_next_dt, sub_skip_emt
+    return fed, pub_P, pub_Q, pub_P_ups, pub_V_dc, sub_V_mag, sub_V_angle, sub_next_dt, sub_skip_emt
 
 
 def run_cosim(
@@ -372,7 +433,7 @@ def run_cosim(
     pscad, project = connect_pscad()
     socket_bridge = PSCADSocketBridge(port=40001)
     socket_bridge.start()
-    fed, pub_P, pub_Q, sub_V_mag, sub_V_angle, sub_next_dt, sub_skip_emt = create_pscad_federate(
+    fed, pub_P, pub_Q, pub_P_ups, pub_V_dc, sub_V_mag, sub_V_angle, sub_next_dt, sub_skip_emt = create_pscad_federate(
         core_type=core_type,
         broker_name=broker_name,
         adaptive=adaptive,
@@ -384,6 +445,8 @@ def run_cosim(
     stub_state = {
         "p_mw": rated_p_mw,
         "q_mvar": rated_q_mvar,
+        "p_ups_mw": 0.0,
+        "v_dc_v": 900.0,
         "last_t": 0.0,
         "status": "NORMAL",
         "trip_timer": 0.0,
@@ -396,6 +459,8 @@ def run_cosim(
     h.helicsFederateEnterInitializingMode(fed)
     h.helicsPublicationPublishDouble(pub_P, rated_p_mw)
     h.helicsPublicationPublishDouble(pub_Q, rated_q_mvar)
+    h.helicsPublicationPublishDouble(pub_P_ups, 0.0)
+    h.helicsPublicationPublishDouble(pub_V_dc, 900.0)
     h.helicsFederateEnterExecutingMode(fed)
 
     current_time = 0.0
@@ -449,6 +514,8 @@ def run_cosim(
 
         h.helicsPublicationPublishDouble(pub_P, P_MW)
         h.helicsPublicationPublishDouble(pub_Q, Q_MVAR)
+        h.helicsPublicationPublishDouble(pub_P_ups, float(stub_state.get("p_ups_mw", 0.0)))
+        h.helicsPublicationPublishDouble(pub_V_dc, float(stub_state.get("v_dc_v", 900.0)))
         current_time = granted_time
 
     socket_bridge.close()

@@ -40,9 +40,11 @@ helios_cosim/
 │   │   └── reconnection/
 │   │       ├── run_reconnection_study.py      # 3-way benchmark: Co-Sim Step vs. Ramp vs. Stiff Grid
 │   │       ├── plot_results.py                # High-clarity adaptive-axis waveform plotter
+│   │       ├── plot_simple_story.py           # Clean 3-panel single-simulation presentation figure
 │   │       └── RECONNECTION_STUDY.md          # Technical guide for the datacenter reconnection study
 │   └── results/
-│       ├── figures/                           # Publication & telemetry waveform plots (.png)
+│       ├── README.md                          # Guide to all figures, datasets, and logs
+│       ├── figures/                           # Publication, presentation & telemetry plots (.png)
 │       ├── data/                              # Benchmark timeseries outputs (.json)
 │       └── logs/                              # Saved federate telemetry logs
 │
@@ -186,6 +188,25 @@ We would like to thank Tim McNamara, Professor Larry Pileggi, and other lab memb
    - Siemens PTI, *PSS®E — High-Performance Transmission Planning and Analysis Software*.
 5. **ERCOT Baseline Datacenter / Large-Load EMT Model:** Electric Reliability Council of Texas (ERCOT), *Large Flexible Load Task Force (LFLTF) — Baseline Datacenter / Large-Load EMT Modeling Reference* (heavily modified in PSCAD for HELIOS boundary co-simulation, fault ride-through, and reconnection studies). [https://www.ercot.com](https://www.ercot.com)
 6. **Large-Load & Datacenter Grid Reliability:** North American Electric Reliability Corporation (NERC), *Large Loads Task Force (LLTF) — Characteristics and Risks of Emerging Large Loads*, Technical Reports and Interconnection Reliability Assessments. [https://www.nerc.com](https://www.nerc.com)
+
+---
+
+## How to Cite
+
+If you use HELIOS in your research, coursework, or software, please cite it as:
+
+> Misra, V., & Agarwal, A. (2026). *HELIOS: Hybrid Adaptive TS–EMT Co-Simulation and Component Validation Framework* (Version 1.0.0) [Computer software]. GitHub. https://github.com/vedmis001/HELIOS
+
+```bibtex
+@software{misra2026helios,
+  author       = {Misra, V. and Agarwal, A.},
+  title        = {{HELIOS: Hybrid Adaptive TS--EMT Co-Simulation and Component Validation Framework}},
+  version      = {1.0.0},
+  year         = {2026},
+  publisher    = {GitHub},
+  url          = {https://github.com/vedmis001/HELIOS}
+}
+```
 
 ---
 
