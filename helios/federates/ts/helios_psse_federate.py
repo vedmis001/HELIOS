@@ -47,7 +47,13 @@ import logging
 import math
 import numpy as np
 
-from learned_scheduler import (
+from pathlib import Path
+
+HELIOS_ROOT = Path(__file__).resolve().parents[2]
+if str(HELIOS_ROOT) not in sys.path:
+    sys.path.insert(0, str(HELIOS_ROOT))
+
+from core.scheduler.learned_scheduler import (
     BoundarySurrogateRLS,
     AdaptiveStepPolicy,
     SchedulerConfig,

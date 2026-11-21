@@ -1,4 +1,0 @@
-[2026-11-18 12:42:30.584] [console] [warning] commWarning||27136-WxERQ-oylRT-iziKv-pe3G5 (1)[operating]::unknown route and no broker, dropping message pub:From (131073) handle(2) size 16 at 4.927711605 to 131072
-[2026-11-18 12:42:30.586] [console] [warning] commWarning||27136-WxERQ-oylRT-iziKv-pe3G5 (1)[operating]::unknown route and no broker, dropping message pub:From (131073) handle(3) size 16 at 4.927711605 to 131072
-[2026-11-18 12:42:30.586] [console] [warning] commWarning||27136-WxERQ-oylRT-iziKv-pe3G5 (1)[operating]::unknown route and no broker, dropping message pub:From (131073) handle(4) size 16 at 4.927711605 to 131072
-[2026-11-18 12:42:30.586] [console] [warning] commWarning||27136-WxERQ-oylRT-iziKv-pe3G5 (1)[operating]::unknown route and no broker, dropping message pub:From (131073) handle(5) size 9 at 4.927711605 to 131072

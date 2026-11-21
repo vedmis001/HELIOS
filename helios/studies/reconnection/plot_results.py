@@ -25,8 +25,9 @@ from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-LOG_FILE = SCRIPT_DIR / "psse_federate.log"
-PLOT_FILE = SCRIPT_DIR / "helios_reconnection_plot.png"
+HELIOS_ROOT = Path(__file__).resolve().parents[2]
+LOG_FILE = HELIOS_ROOT / "results" / "logs" / "psse_federate.log"
+PLOT_FILE = HELIOS_ROOT / "results" / "figures" / "helios_reconnection_plot.png"
 
 
 def load_from_log(log_path: Path):

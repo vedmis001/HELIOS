@@ -32,13 +32,19 @@ import numpy as np
 
 # Configure paths
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+HELIOS_ROOT = Path(__file__).resolve().parents[2]
+RESULTS_DATA_DIR = HELIOS_ROOT / "results" / "data"
+RESULTS_FIGURES_DIR = HELIOS_ROOT / "results" / "figures"
+RESULTS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+RESULTS_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+if str(HELIOS_ROOT) not in sys.path:
+    sys.path.insert(0, str(HELIOS_ROOT))
 
 import helics as h
-from helios_pscad_federate import run_cosim as run_pscad_loop
-from helios_ts_federate import run_ts_federate
-from run_adaptive_cosim import run_cosim_pair
+from federates.emt.helios_pscad_federate import run_cosim as run_pscad_loop
+from federates.ts.helios_ts_federate import run_ts_federate
+from runners.run_adaptive_cosim import run_cosim_pair
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,7 +95,7 @@ def run_single_case(case_name: str, reconnect_mode: str, backend: str = "synthet
     log.info(f"Reconnection: t={scenario['reconnect_time_s']}s")
     log.info("=" * 75)
 
-    out_file = SCRIPT_DIR / f"results_{case_name.lower()}.json"
+    out_file = RESULTS_DATA_DIR / f"results_{case_name.lower()}.json"
     res = run_cosim_pair(
         scenario=scenario,
         core_type="inproc",
@@ -299,7 +305,7 @@ def main():
     print_comparison_table(res_step, res_ramp, res_no_ts)
 
     # Generate 2-column comparative publication figure
-    plot_path = SCRIPT_DIR / args.out_plot
+    plot_path = RESULTS_FIGURES_DIR / args.out_plot
     plot_three_case_comparison(res_step, res_ramp, res_no_ts, save_path=str(plot_path))
 
 

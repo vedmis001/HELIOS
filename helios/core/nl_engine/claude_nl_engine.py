@@ -328,7 +328,10 @@ def main():
     if args.dry_run:
         return
 
-    from run_adaptive_cosim import run_cosim_pair
+    HELIOS_ROOT = Path(__file__).resolve().parents[2]
+    if str(HELIOS_ROOT) not in sys.path:
+        sys.path.insert(0, str(HELIOS_ROOT))
+    from runners.run_adaptive_cosim import run_cosim_pair
     results = run_cosim_pair(
         scenario=scenario,
         core_type=args.core,

@@ -18,12 +18,17 @@ import logging
 import math
 import os
 from pathlib import Path
+import sys
 import time
 from typing import Any, Dict, List, Optional
 import helics as h
 import numpy as np
 
-from learned_scheduler import (
+HELIOS_ROOT = Path(__file__).resolve().parents[2]
+if str(HELIOS_ROOT) not in sys.path:
+    sys.path.insert(0, str(HELIOS_ROOT))
+
+from core.scheduler.learned_scheduler import (
     AdaptiveStepPolicy,
     BoundarySurrogateRLS,
     ScenarioContext,
@@ -31,7 +36,7 @@ from learned_scheduler import (
     load_learned_state,
     save_learned_state,
 )
-from ts_backend import create_ts_backend
+from core.backends.ts_backend import create_ts_backend
 
 logging.basicConfig(
     level=logging.INFO,

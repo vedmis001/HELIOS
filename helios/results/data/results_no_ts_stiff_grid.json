@@ -4,7 +4,7 @@
   "scheduler_mode": "learned_adaptive",
   "component_profile": "datacenter_vfd",
   "sim_time_s": 3.5,
-  "wall_time_s": 0.2398,
+  "wall_time_s": 0.2289,
   "total_steps": 647,
   "fixed_10ms_baseline_steps": 350,
   "emt_sync_calls": 623,

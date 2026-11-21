@@ -11,7 +11,7 @@ This module provides a standalone Python **Modified Nodal Analysis (MNA)** elect
 - `configs/` — JSON circuit configurations (`rc_test.json`, `rl_test.json`, `rlc_test.json`, `battery_test.json`, `buckboost_test.json`, `machine_test.json`, `transformer_test.json`, `ups_slice_test.json`).
 - `tests/` — Unit tests and adaptive stepping benchmarks.
 - `validation/` — PSCAD comparison (`compare_pscad.py`) and figure generation (`generate_slide_figures.py`).
-- `results/` — Pre-generated benchmark waveforms and CSV traces.
+- `results/` — Pre-generated benchmark outputs organized into `results/data/` (`.csv`) and `results/figures/` (`components/`, `benchmarks/`, `slides/`).
 
 ## Quick Usage
 

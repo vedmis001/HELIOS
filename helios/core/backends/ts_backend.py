@@ -76,7 +76,7 @@ class TSAOptBackend(TSBackend):
         ix_dict: Optional[Dict[str, Any]] = None,
         V0: Optional[np.ndarray] = None,
     ):
-        self.tsaopt_root = tsaopt_root or str(Path(__file__).resolve().parent.parent / "tsaopt")
+        self.tsaopt_root = tsaopt_root or str(Path(__file__).resolve().parents[3] / "tsaopt")
         self.model_dict = model_dict
         self.ix_dict = ix_dict
         self.V_curr = V0.copy() if V0 is not None else None

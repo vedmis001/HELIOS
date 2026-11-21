@@ -10,12 +10,17 @@ import argparse
 import json
 import math
 from pathlib import Path
+import sys
 import threading
 from typing import Any, Dict, Optional
 import helics as h
 
-from helios_pscad_federate import run_cosim as run_pscad_loop
-from helios_ts_federate import run_ts_federate
+HELIOS_ROOT = Path(__file__).resolve().parents[1]
+if str(HELIOS_ROOT) not in sys.path:
+    sys.path.insert(0, str(HELIOS_ROOT))
+
+from federates.emt.helios_pscad_federate import run_cosim as run_pscad_loop
+from federates.ts.helios_ts_federate import run_ts_federate
 
 
 def run_cosim_pair(
